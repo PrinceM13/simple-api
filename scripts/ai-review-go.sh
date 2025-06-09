@@ -22,7 +22,6 @@ if ! command -v jq &> /dev/null; then
   exit 1
 fi
 
-
 # Collect staged Go files
 FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.go$')
 
@@ -39,7 +38,7 @@ for file in $FILES; do
 done
 
 # Send to OpenAI
-RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+API_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/openai_response.json https://api.openai.com/v1/chat/completions \
   -H "Authorization: Bearer ${OPENAI_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -55,7 +54,18 @@ RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
       }
     ],
     "temperature": 0.3
-  }' | jq -r '.choices[0].message.content')
+  }')
+
+# Separate HTTP status code from output
+HTTP_STATUS="${API_RESPONSE: -3}"
+
+if [ "$HTTP_STATUS" -ne 200 ]; then
+  echo "❌ OpenAI API request failed with status $HTTP_STATUS"
+  cat /tmp/openai_response.json
+  exit 1
+fi
+
+RESPONSE=$(jq -r '.choices[0].message.content' /tmp/openai_response.json)
 
 echo -e "\n🔍 AI Review Results:\n$RESPONSE"
 
