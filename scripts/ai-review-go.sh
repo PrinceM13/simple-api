@@ -38,23 +38,31 @@ for file in $FILES; do
 done
 
 # Send to OpenAI
+
+GO_MOD_CONTENT=$(<go.mod)
+
+JSON_PAYLOAD=$(jq -n \
+  --arg gomod "$GO_MOD_CONTENT" \
+  --arg content "$CONTENT" \
+  '{
+    model: "gpt-3.5-turbo",
+    temperature: 0.3,
+    messages: [
+      {
+        role: "system",
+        content: "You are a strict senior Go reviewer. The project uses Go modules, so imports should use full module paths, not relative imports. Classify problems as:\n1. NEED TO FIX\n2. NEED TO FIX or TODO\n3. Just INFO.\nIf level 1 or 2, explain why. Use plain output, not markdown."
+      },
+      {
+        role: "user",
+        content: $content
+      }
+    ]
+  }')
+
 API_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/openai_response.json https://api.openai.com/v1/chat/completions \
   -H "Authorization: Bearer ${OPENAI_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [
-      {
-        "role": "system",
-        "content": "You are a strict senior Go reviewer. Classify problems as:\n1. NEED TO FIX\n2. NEED TO FIX or TODO\n3. Just INFO.\nIf level 1 or 2, explain why. Use plain output, not markdown."
-      },
-      {
-        "role": "user",
-        "content": "'"$(echo -e "$CONTENT" | jq -Rs .)"'"
-      }
-    ],
-    "temperature": 0.3
-  }')
+  -d "$JSON_PAYLOAD")
 
 # Separate HTTP status code from output
 HTTP_STATUS="${API_RESPONSE: -3}"
@@ -71,22 +79,29 @@ echo -e "\n🔍 AI Review Results:\n$RESPONSE"
 
 # Block if level 1 or level 2 without // TODO or // CONFIRM
 BLOCK=false
+
 if echo "$RESPONSE" | grep -q "NEED TO FIX"; then
-  echo -e "\n⛔ Commit blocked: Fix level 1 issues first."
-  BLOCK=true
-elif echo "$RESPONSE" | grep -q "NEED TO FIX or TODO"; then
+  BLOCKED=false
+
+  # Extract import paths from AI response
+  IMPORTS_TO_FIX=$(echo "$RESPONSE" | grep "NEED TO FIX" | grep -oE '"[^"]+"' | tr -d '"')
+
   for file in $FILES; do
-    if ! grep -Eq "// TODO|// CONFIRM" "$file"; then
-      echo -e "\n⛔ Commit blocked: Level 2 but no TODO/CONFIRM comment."
-      BLOCK=true
-      break
-    fi
+    while IFS= read -r line; do
+      for path in $IMPORTS_TO_FIX; do
+        if [[ "$line" == *"$path"* ]] && [[ "$line" != *"// CONFIRM"* ]]; then
+          echo -e "\n⛔ Commit blocked in $file: \"$line\" needs fixing or explicit // CONFIRM."
+          BLOCKED=true
+        fi
+      done
+    done < "$file"
   done
+
+  if [ "$BLOCKED" = true ]; then
+    exit 1
+  fi
 fi
 
-if [ "$BLOCK" = true ]; then
-  exit 1
-fi
 
 echo "✅ AI review passed."
 exit 0
