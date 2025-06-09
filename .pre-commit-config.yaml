@@ -10,4 +10,5 @@ repos:
     rev: v4.5.0  # or latest
     hooks:
       - id: trailing-whitespace
+        name: Remove trailing whitespace
 
