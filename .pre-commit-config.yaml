@@ -6,6 +6,13 @@ repos:
         entry: ./scripts/ai-review-go.sh
         language: script
         files: \.go$
+      # - id: sonar-push-check
+      #   name: SonarQube Scanner Check
+      #   entry: ./scripts/sonar-pre-push.sh
+      #   language: script
+      #   pass_filenames: false
+      #   stages: [push]  # run this only on git push
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0  # or latest
     hooks:
